@@ -1,0 +1,141 @@
+{
+  "name": "hydration_file_pipeline",
+  "properties": {
+    "activities": [
+      {
+        "name": "copy_sharepoint_to_adls",
+        "type": "Copy",
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings",
+              "recursive": true
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings"
+            }
+          },
+          "sink": {
+            "type": "DelimitedTextSink",
+            "storeSettings": {
+              "type": "AzureBlobStorageWriteSettings"
+            },
+            "formatSettings": {
+              "type": "DelimitedTextWriteSettings",
+              "quoteAllText": true,
+              "fileExtension": ".txt"
+            }
+          },
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "hydration_file",
+            "type": "DatasetReference",
+            "parameters": {
+              "Foldername": {
+                "value": "@pipeline().parameters.sourceFolder",
+                "type": "Expression"
+              },
+              "filename": {
+                "value": "@pipeline().parameters.sourceFile",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "hydration_file_tgt",
+            "type": "DatasetReference",
+            "parameters": {
+              "Filename": {
+                "value": "@pipeline().parameters.targetfile",
+                "type": "Expression"
+              },
+              "Foldername": {
+                "value": "@pipeline().parameters.targetFolder",
+                "type": "Expression"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "load_adls_to_sql_table",
+        "type": "Copy",
+        "dependsOn": [
+          {
+            "activity": "copy_sharepoint_to_adls",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "AzureBlobStorageReadSettings"
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings"
+            }
+          },
+          "sink": {
+            "type": "SqlServerSink",
+            "preCopyScript": "TRUNCATE TABLE <schema>.tablelist",
+            "writeBehavior": "insert"
+          },
+          "translator": {
+            "type": "TabularTranslator",
+            "typeConversion": true
+          }
+        },
+        "inputs": [
+          {
+            "referenceName": "hydration_file_tgt",
+            "type": "DatasetReference",
+            "parameters": {
+              "Filename": {
+                "value": "@pipeline().parameters.targetfile",
+                "type": "Expression"
+              },
+              "Foldername": {
+                "value": "@pipeline().parameters.targetFolder",
+                "type": "Expression"
+              }
+            }
+          }
+        ],
+        "outputs": [
+          {
+            "referenceName": "ds_sql_table",
+            "type": "DatasetReference"
+          }
+        ]
+      }
+    ],
+    "parameters": {
+      "sourceFolder": {
+        "type": "string",
+        "defaultValue": "sharepoint"
+      },
+      "sourceFile": {
+        "type": "string",
+        "defaultValue": "hydrationfile.csv"
+      },
+      "targetFolder": {
+        "type": "string",
+        "defaultValue": "hydration-file"
+      },
+      "targetfile": {
+        "type": "string",
+        "defaultValue": "hydration.csv"
+      }
+    }
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}

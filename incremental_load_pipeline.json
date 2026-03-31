@@ -1,0 +1,172 @@
+{
+  "name": "incremental_load_pipeline",
+  "properties": {
+    "activities": [
+      {
+        "name": "foreach_incremental_tables",
+        "type": "ForEach",
+        "typeProperties": {
+          "items": {
+            "value": "@pipeline().parameters.IncloadTableList",
+            "type": "Expression"
+          },
+          "isSequential": false,
+          "batchCount": 5,
+          "activities": [
+            {
+              "name": "fetch_watermark",
+              "type": "Lookup",
+              "policy": {
+                "retry": 3,
+                "retryIntervalInSeconds": 60
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "SqlServerSource",
+                  "sqlReaderQuery": {
+                    "value": "@concat('SELECT watermarkDateTime FROM febmar25m.watermarktable WHERE tablename=''',item().sourceTableName,'''')",
+                    "type": "Expression"
+                  }
+                },
+                "dataset": {
+                  "referenceName": "ds_sql_table",
+                  "type": "DatasetReference"
+                },
+                "firstRowOnly": true
+              }
+            },
+            {
+              "name": "fetch_max_modified_date",
+              "type": "Lookup",
+              "policy": {
+                "retry": 3,
+                "retryIntervalInSeconds": 60
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "SqlServerSource",
+                  "sqlReaderQuery": {
+                    "value": "@concat('SELECT MAX(ModifiedDate) AS max_modifiedDateTime FROM ', item().sourceSchema,'.',item().sourceTableName)",
+                    "type": "Expression"
+                  }
+                },
+                "dataset": {
+                  "referenceName": "ds_sql_onprem",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "schema": {
+                      "value": "@item().sourceSchema",
+                      "type": "Expression"
+                    },
+                    "tablename": {
+                      "value": "@item().sourceTableName",
+                      "type": "Expression"
+                    }
+                  }
+                },
+                "firstRowOnly": true
+              }
+            },
+            {
+              "name": "copy_incremental_data",
+              "type": "Copy",
+              "dependsOn": [
+                {
+                  "activity": "fetch_watermark",
+                  "dependencyConditions": ["Succeeded"]
+                },
+                {
+                  "activity": "fetch_max_modified_date",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "policy": {
+                "retry": 3,
+                "retryIntervalInSeconds": 60
+              },
+              "typeProperties": {
+                "source": {
+                  "type": "SqlServerSource",
+                  "sqlReaderQuery": {
+                    "value": "@concat('SELECT * FROM ', item().sourceSchema,'.',item().sourceTableName, ' WHERE ModifiedDate > ''', formatDateTime(activity('fetch_watermark').output.firstRow.watermarkDateTime,'yyyy-MM-dd HH:mm:ss'), ''' AND ModifiedDate <= ''', formatDateTime(activity('fetch_max_modified_date').output.firstRow.max_modifiedDateTime,'yyyy-MM-dd HH:mm:ss'), '''')",
+                    "type": "Expression"
+                  }
+                },
+                "sink": {
+                  "type": "DelimitedTextSink",
+                  "storeSettings": {
+                    "type": "AzureBlobStorageWriteSettings"
+                  },
+                  "formatSettings": {
+                    "type": "DelimitedTextWriteSettings",
+                    "quoteAllText": true,
+                    "fileExtension": ".csv"
+                  }
+                }
+              },
+              "inputs": [
+                {
+                  "referenceName": "ds_sql_onprem",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "schema": {
+                      "value": "@item().sourceSchema",
+                      "type": "Expression"
+                    },
+                    "tablename": {
+                      "value": "@item().sourceTableName",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "ds_bronze_layer",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "filename": {
+                      "value": "@concat(item().sourceSchema,'_',item().sourceTableName,'.csv')",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "name": "update_watermark",
+              "type": "Script",
+              "dependsOn": [
+                {
+                  "activity": "copy_incremental_data",
+                  "dependencyConditions": ["Succeeded"]
+                }
+              ],
+              "linkedServiceName": {
+                "referenceName": "ls_sql_dev_azure",
+                "type": "LinkedServiceReference"
+              },
+              "typeProperties": {
+                "scripts": [
+                  {
+                    "type": "Query",
+                    "text": {
+                      "value": "@concat('UPDATE febmar25m.watermarktable SET watermarkDateTime = ''', formatDateTime(activity('fetch_max_modified_date').output.firstRow.max_modifiedDateTime,'yyyy-MM-dd HH:mm:ss'), ''' WHERE tablename = ''', item().sourceTableName, '''')",
+                      "type": "Expression"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "parameters": {
+      "IncloadTableList": {
+        "type": "array"
+      }
+    }
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}

@@ -1,0 +1,112 @@
+{
+  "name": "data_load_pipeline",
+  "properties": {
+    "activities": [
+      {
+        "name": "fetch_table_list",
+        "type": "Lookup",
+        "policy": {
+          "retry": 3,
+          "retryIntervalInSeconds": 60
+        },
+        "typeProperties": {
+          "source": {
+            "type": "SqlServerSource"
+          },
+          "dataset": {
+            "referenceName": "ds_sql_table",
+            "type": "DatasetReference"
+          },
+          "firstRowOnly": false
+        }
+      },
+      {
+        "name": "filter_full_load_tables",
+        "type": "Filter",
+        "dependsOn": [
+          {
+            "activity": "fetch_table_list",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('fetch_table_list').output.value",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@equals(item().LoadType,'full')",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "filter_incremental_tables",
+        "type": "Filter",
+        "dependsOn": [
+          {
+            "activity": "fetch_table_list",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('fetch_table_list').output.value",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@equals(item().LoadType,'inc')",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "execute_full_load_pipeline",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "filter_full_load_tables",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "full_load_pipeline",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "Fullloadtables": {
+              "value": "@activity('filter_full_load_tables').output.value",
+              "type": "Expression"
+            }
+          }
+        }
+      },
+      {
+        "name": "execute_incremental_pipeline",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "filter_incremental_tables",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "incremental_load_pipeline",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "IncloadTableList": {
+              "value": "@activity('filter_incremental_tables').output.value",
+              "type": "Expression"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}

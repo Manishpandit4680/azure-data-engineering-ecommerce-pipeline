@@ -1,0 +1,225 @@
+{
+  "name": "master_pipeline_adf",
+  "properties": {
+    "activities": [
+      {
+        "name": "wa_notify_start",
+        "type": "WebActivity",
+        "typeProperties": {
+          "method": "POST",
+          "url": "LOGIC_APP_URL",
+          "body": {
+            "To": "your_email@example.com",
+            "Subject": "Data Migration Started - @{pipeline().Pipeline}",
+            "Body": "Pipeline @{pipeline().Pipeline} has started at @{utcNow()}."
+          }
+        }
+      },
+      {
+        "name": "log-starting",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "wa_notify_start",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "source": {
+            "type": "SqlServerSource",
+            "sqlReaderStoredProcedureName": "[febmar25m].[uspADFLogsStartingHierarchy]",
+            "storedProcedureParameters": {
+              "p_ADFName": {
+                "value": "@pipeline().DataFactory",
+                "type": "Expression"
+              },
+              "p_PipeLineName": {
+                "value": "@pipeline().Pipeline",
+                "type": "Expression"
+              },
+              "p_RunID": {
+                "value": "@pipeline().RunId",
+                "type": "Expression"
+              },
+              "p_StartTime": {
+                "value": "@utcNow()",
+                "type": "Expression"
+              },
+              "pid": {
+                "value": null,
+                "type": "Int32"
+              }
+            }
+          },
+          "dataset": {
+            "referenceName": "ds_sql_table",
+            "type": "DatasetReference"
+          }
+        }
+      },
+      {
+        "name": "Hydrationfile",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "log-starting",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "2 hydration file movement",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true
+        }
+      },
+      {
+        "name": "data_load_onprem_to_bronze",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "Hydrationfile",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "3 Data load from on-prem to cloud",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true
+        }
+      },
+      {
+        "name": "silver_layer_pipeline",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "data_load_onprem_to_bronze",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "6 Silver layer call",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "silvernotebooklist": {
+              "value": "@variables('silvercall')",
+              "type": "Expression"
+            }
+          }
+        }
+      },
+      {
+        "name": "gold_layer_pipeline",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "silver_layer_pipeline",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "7 gold layer call",
+            "type": "PipelineReference"
+          },
+          "waitOnCompletion": true,
+          "parameters": {
+            "goldnotebooklist": {
+              "value": "@variables('goldcall')",
+              "type": "Expression"
+            }
+          }
+        }
+      },
+      {
+        "name": "Ending-log-success",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "gold_layer_pipeline",
+            "dependencyConditions": ["Succeeded"]
+          }
+        ],
+        "typeProperties": {
+          "storedProcedureName": "[febmar25m].[uspADFLogsEndingHierarchy]",
+          "storedProcedureParameters": {
+            "p_EndTime": {
+              "value": "@utcNow()",
+              "type": "Expression"
+            },
+            "p_ErrorMessage": {
+              "value": "none",
+              "type": "String"
+            },
+            "p_id": {
+              "value": "@activity('log-starting').output.firstRow.id",
+              "type": "Expression"
+            },
+            "p_Status": {
+              "value": "SUCCESS",
+              "type": "String"
+            }
+          }
+        }
+      },
+      {
+        "name": "Ending-log-fail",
+        "type": "SqlServerStoredProcedure",
+        "dependsOn": [
+          {
+            "activity": "gold_layer_pipeline",
+            "dependencyConditions": ["Failed"]
+          }
+        ],
+        "typeProperties": {
+          "storedProcedureName": "[febmar25m].[uspADFLogsEndingHierarchy]",
+          "storedProcedureParameters": {
+            "p_EndTime": {
+              "value": "@utcNow()",
+              "type": "Expression"
+            },
+            "p_ErrorMessage": {
+              "value": "@activity('gold_layer_pipeline').error.message",
+              "type": "Expression"
+            },
+            "p_id": {
+              "value": "@activity('log-starting').output.firstRow.id",
+              "type": "Expression"
+            },
+            "p_Status": {
+              "value": "FAIL",
+              "type": "String"
+            }
+          }
+        }
+      }
+    ],
+    "variables": {
+      "goldcall": {
+        "type": "Array",
+        "defaultValue": [
+          "/Workspace/.../CustomerOrderSummary",
+          "/Workspace/.../ProductPerformance",
+          "/Workspace/.../DailySalesSummary",
+          "/Workspace/.../CategoryWiseSales"
+        ]
+      },
+      "silvercall": {
+        "type": "Array",
+        "defaultValue": [
+          "/Workspace/.../Customers",
+          "/Workspace/.../Products",
+          "/Workspace/.../Orders",
+          "/Workspace/.../Payments"
+        ]
+      }
+    }
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}

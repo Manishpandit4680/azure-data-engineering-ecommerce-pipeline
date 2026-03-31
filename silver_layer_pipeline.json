@@ -1,0 +1,57 @@
+{
+  "name": "silver_layer_pipeline",
+  "properties": {
+    "activities": [
+      {
+        "name": "foreach_silver_notebooks",
+        "type": "ForEach",
+        "typeProperties": {
+          "items": {
+            "value": "@pipeline().parameters.silvernotebooklist",
+            "type": "Expression"
+          },
+          "isSequential": false,
+          "batchCount": 3,
+          "activities": [
+            {
+              "name": "run_silver_notebook",
+              "type": "DatabricksNotebook",
+              "policy": {
+                "retry": 2,
+                "retryIntervalInSeconds": 60
+              },
+              "typeProperties": {
+                "notebookPath": {
+                  "value": "@item()",
+                  "type": "Expression"
+                }
+              },
+              "linkedServiceName": {
+                "referenceName": "ls_databricks",
+                "type": "LinkedServiceReference"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "parameters": {
+      "silvernotebooklist": {
+        "type": "array",
+        "defaultValue": [
+          "/Workspace/Silver/Customers",
+          "/Workspace/Silver/Products",
+          "/Workspace/Silver/Orders",
+          "/Workspace/Silver/Payments",
+          "/Workspace/Silver/Returns",
+          "/Workspace/Silver/Shipping",
+          "/Workspace/Silver/Inventory",
+          "/Workspace/Silver/Review",
+          "/Workspace/Silver/Promotions",
+          "/Workspace/Silver/OrderItems"
+        ]
+      }
+    }
+  },
+  "type": "Microsoft.DataFactory/factories/pipelines"
+}
